@@ -1,8 +1,5 @@
 # Go support for Protocol Buffers - Google's data interchange format
 
-[![Build Status](https://travis-ci.org/golang/protobuf.svg?branch=master)](https://travis-ci.org/golang/protobuf)
-[![GoDoc](https://godoc.org/github.com/golang/protobuf?status.svg)](https://godoc.org/github.com/golang/protobuf)
-
 Google's data interchange format.
 Copyright 2010 The Go Authors.
 https://github.com/golang/protobuf
@@ -13,47 +10,71 @@ This software implements Go bindings for protocol buffers.  For
 information about protocol buffers themselves, see
 	https://developers.google.com/protocol-buffers/
 
-## Installation ##
-
-To use this software, you must:
-- Install the standard C++ implementation of protocol buffers from
-	https://developers.google.com/protocol-buffers/
-- Of course, install the Go compiler and tools from
-	https://golang.org/
-  See
-	https://golang.org/doc/install
-  for details or, if you are using gccgo, follow the instructions at
-	https://golang.org/doc/install/gccgo
-- Grab the code from the repository and install the `proto` package.
-  The simplest way is to run:
-  ```
-  go get -u github.com/golang/protobuf/protoc-gen-go
-  ```
-  The compiler plugin, `protoc-gen-go`, will be installed in `$GOPATH/bin`
-  unless `$GOBIN` is set. It must be in your `$PATH` for the protocol
-  compiler, `protoc`, to find it.
-- If you need a particular version of `protoc-gen-go` (e.g., to match your
-  `proto` package version), one option is
-  ```shell
-  GIT_TAG="v1.2.0" # change as needed
-  go get -d -u github.com/golang/protobuf/protoc-gen-go
-  git -C "$(go env GOPATH)"/src/github.com/golang/protobuf checkout $GIT_TAG
-  go install github.com/golang/protobuf/protoc-gen-go
-  ```
-
-This software has two parts: a 'protocol compiler plugin' that
-generates Go source files that, once compiled, can access and manage
-protocol buffers; and a library that implements run-time support for
-encoding (marshaling), decoding (unmarshaling), and accessing protocol
-buffers.
-
-There is support for gRPC in Go using protocol buffers.
-See the note at the bottom of this file for details.
-
-There are no insertion points in the plugin.
-
-
 ## Using protocol buffers with Go ##
+
+The standard Makefile template to use is available in this repo. You must copy "Makefile" and 
+
+```
+SHELL := /bin/bash
+export GO111MODULE=on
+GOLIST=go list -f "{{ .Dir }}" -m
+
+GOLANGCI_LINT=hack/bin/golangci-lint
+PROTOC_GEN_GO=hack/bin/protoc-gen-go
+PROTOWRAP=hack/bin/protowrap
+
+all:
+
+vendor:
+	go mod vendor
+
+$(PROTOC_GEN_GO):
+	cd ./hack; \
+	go build -v \
+		-o ./bin/protoc-gen-go \
+		github.com/golang/protobuf/protoc-gen-go
+
+$(PROTOWRAP):
+	cd ./hack; \
+	go build -v \
+		-o ./bin/protowrap \
+		github.com/square/goprotowrap/cmd/protowrap
+
+$(GOLANGCI_LINT):
+	cd ./hack; \
+	go build -v \
+		-o ./bin/golangci-lint \
+		github.com/golangci/golangci-lint/cmd/golangci-lint
+
+genproto: $(PROTOWRAP) $(PROTOC_GEN_GO) vendor
+	shopt -s globstar; \
+	set -eo pipefail; \
+	export GO111MODULE=on; \
+	export PROJECT=$$(go list -m); \
+	export PATH=$$(pwd)/hack/bin:$${PATH}; \
+	mkdir -p $$(pwd)/vendor/$$(dirname $${PROJECT}); \
+	rm $$(pwd)/vendor/$${PROJECT} || true; \
+	ln -s $$(pwd) $$(pwd)/vendor/$${PROJECT} ; \
+	$(PROTOWRAP) \
+		-I $$(pwd)/vendor \
+		--go_out=plugins=grpc:$$(pwd)/vendor \
+		--proto_path $$(pwd)/vendor \
+		--print_structure \
+		--only_specified_files \
+		$$(\
+			git \
+				ls-files "*.proto" |\
+				xargs printf -- \
+				"$$(pwd)/vendor/$${PROJECT}/%s ")
+
+gengo: genproto
+
+lint: $(GOLANGCI_LINT)
+	$(GOLANGCI_LINT) run ./...
+
+test:
+	go test -v ./...
+```
 
 Once the software is installed, there are two steps to using it.
 First you must compile the protocol buffer definitions and then import
