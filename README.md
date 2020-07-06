@@ -12,7 +12,9 @@ information about protocol buffers themselves, see
 
 ## Using protocol buffers with Go ##
 
-The standard Makefile template to use is available in this repo. You must copy "Makefile" and 
+The standard Makefile template to use is available in this repo. You can find it
+under [aperture-sample](./aperture-sample). You need both the Makefile and the
+hack/ dir.
 
 ```
 SHELL := /bin/bash
@@ -76,185 +78,6 @@ test:
 	go test -v ./...
 ```
 
-Once the software is installed, there are two steps to using it.
-First you must compile the protocol buffer definitions and then import
-them, with the support library, into your program.
-
-To compile the protocol buffer definition, run protoc with the --go_out
-parameter set to the directory you want to output the Go code to.
-
-	protoc --go_out=. *.proto
-
-The generated files will be suffixed .pb.go.  See the Test code below
-for an example using such a file.
-
-## Packages and input paths ##
-
-The protocol buffer language has a concept of "packages" which does not
-correspond well to the Go notion of packages. In generated Go code,
-each source `.proto` file is associated with a single Go package. The
-name and import path for this package is specified with the `go_package`
-proto option:
-
-	option go_package = "github.com/golang/protobuf/ptypes/any";
-
-The protocol buffer compiler will attempt to derive a package name and
-import path if a `go_package` option is not present, but it is
-best to always specify one explicitly.
-
-There is a one-to-one relationship between source `.proto` files and
-generated `.pb.go` files, but any number of `.pb.go` files may be
-contained in the same Go package.
-
-The output name of a generated file is produced by replacing the
-`.proto` suffix with `.pb.go` (e.g., `foo.proto` produces `foo.pb.go`).
-However, the output directory is selected in one of two ways.  Let
-us say we have `inputs/x.proto` with a `go_package` option of
-`github.com/golang/protobuf/p`. The corresponding output file may
-be:
-
-- Relative to the import path:
-
-```shell
-  protoc --go_out=. inputs/x.proto
-  # writes ./github.com/golang/protobuf/p/x.pb.go
-```
-
-  (This can work well with `--go_out=$GOPATH`.)
-
-- Relative to the input file:
-
-```shell
-protoc --go_out=paths=source_relative:. inputs/x.proto
-# generate ./inputs/x.pb.go
-```
-
-## Generated code ##
-
-The package comment for the proto library contains text describing
-the interface provided in Go for protocol buffers. Here is an edited
-version.
-
-The proto package converts data structures to and from the
-wire format of protocol buffers.  It works in concert with the
-Go source code generated for .proto files by the protocol compiler.
-
-A summary of the properties of the protocol buffer interface
-for a protocol buffer variable v:
-
-  - Names are turned from camel_case to CamelCase for export.
-  - There are no methods on v to set fields; just treat
-  	them as structure fields.
-  - There are getters that return a field's value if set,
-	and return the field's default value if unset.
-	The getters work even if the receiver is a nil message.
-  - The zero value for a struct is its correct initialization state.
-	All desired fields must be set before marshaling.
-  - A Reset() method will restore a protobuf struct to its zero state.
-  - Non-repeated fields are pointers to the values; nil means unset.
-	That is, optional or required field int32 f becomes F *int32.
-  - Repeated fields are slices.
-  - Helper functions are available to aid the setting of fields.
-	Helpers for getting values are superseded by the
-	GetFoo methods and their use is deprecated.
-		msg.Foo = proto.String("hello") // set field
-  - Constants are defined to hold the default values of all fields that
-	have them.  They have the form Default_StructName_FieldName.
-	Because the getter methods handle defaulted values,
-	direct use of these constants should be rare.
-  - Enums are given type names and maps from names to values.
-	Enum values are prefixed with the enum's type name. Enum types have
-	a String method, and a Enum method to assist in message construction.
-  - Nested groups and enums have type names prefixed with the name of
-  	the surrounding message type.
-  - Extensions are given descriptor names that start with E_,
-	followed by an underscore-delimited list of the nested messages
-	that contain it (if any) followed by the CamelCased name of the
-	extension field itself.  HasExtension, ClearExtension, GetExtension
-	and SetExtension are functions for manipulating extensions.
-  - Oneof field sets are given a single field in their message,
-	with distinguished wrapper types for each possible field value.
-  - Marshal and Unmarshal are functions to encode and decode the wire format.
-
-When the .proto file specifies `syntax="proto3"`, there are some differences:
-
-  - Non-repeated fields of non-message type are values instead of pointers.
-  - Enum types do not get an Enum method.
-
-Consider file test.proto, containing
-
-```proto
-	syntax = "proto2";
-	package example;
-
-	enum FOO { X = 17; };
-
-	message Test {
-	  required string label = 1;
-	  optional int32 type = 2 [default=77];
-	  repeated int64 reps = 3;
-	}
-```
-
-To create and play with a Test object from the example package,
-
-```go
-	package main
-
-	import (
-		"log"
-
-		"github.com/golang/protobuf/proto"
-		"path/to/example"
-	)
-
-	func main() {
-		test := &example.Test{
-			Label: proto.String("hello"),
-			Type:  proto.Int32(17),
-			Reps:  []int64{1, 2, 3},
-		}
-		data, err := proto.Marshal(test)
-		if err != nil {
-			log.Fatal("marshaling error: ", err)
-		}
-		newTest := &example.Test{}
-		err = proto.Unmarshal(data, newTest)
-		if err != nil {
-			log.Fatal("unmarshaling error: ", err)
-		}
-		// Now test and newTest contain the same data.
-		if test.GetLabel() != newTest.GetLabel() {
-			log.Fatalf("data mismatch %q != %q", test.GetLabel(), newTest.GetLabel())
-		}
-		// etc.
-	}
-```
-
-## Parameters ##
-
-To pass extra parameters to the plugin, use a comma-separated
-parameter list separated from the output directory by a colon:
-
-	protoc --go_out=plugins=grpc,import_path=mypackage:. *.proto
-
-- `paths=(import | source_relative)` - specifies how the paths of
-  generated files are structured. See the "Packages and imports paths"
-  section above. The default is `import`.
-- `plugins=plugin1+plugin2` - specifies the list of sub-plugins to
-  load. The only plugin in this repo is `grpc`.
-- `Mfoo/bar.proto=quux/shme` - declares that foo/bar.proto is
-  associated with Go package quux/shme.  This is subject to the
-  import_prefix parameter.
-
-The following parameters are deprecated and should not be used:
-
-- `import_prefix=xxx` - a prefix that is added onto the beginning of
-  all imports.
-- `import_path=foo/bar` - used as the package if no input files
-  declare `go_package`. If it contains slashes, everything up to the
-  rightmost slash is ignored.
-
 ## gRPC Support ##
 
 If a proto file specifies RPC services, protoc-gen-go can be instructed to
@@ -263,6 +86,34 @@ the `plugins` parameter to protoc-gen-go; the usual way is to insert it into
 the --go_out argument to protoc:
 
 	protoc --go_out=plugins=grpc:. *.proto
+
+## Example Proto File
+
+```proto
+syntax = "proto3";
+package chain;
+
+import "github.com/aperturerobotics/hydra/block/object/object.proto";
+import "github.com/aperturerobotics/hydra/cid/cid.proto";
+
+// RootState is the chain state object in storage.
+message RootState {
+  // GenesisRef is the genesis reference we expect.
+  cid.BlockRef genesis_ref = 1;
+  // BucketId is the bucket id to use on default.
+  string bucket_id = 2;
+  // ChainId is the chain id.
+  string chain_id = 3;
+
+  // HeadBlockRef is the head block reference.
+  // This is the latest VALID block available.
+  // This block may become invalid at a later time.
+  // May be empty if there is no HEAD.
+  object.ObjectRef head_block_ref = 4;
+}
+```
+
+Cross-repo lookups work fine, even with modules, using the makefile provided.
 
 ## Compatibility ##
 
@@ -311,3 +162,17 @@ breaking change and would be subject to the announcement policy stated above.
 The `protoc-gen-go/generator` package exposes a plugin interface,
 which is used by the gRPC code generation. This interface is not
 supported and is subject to incompatible changes without notice.
+
+## Why fork it from the upstream?
+
+The upstream moved to a google-backed repository with a breaking API change. The
+entire Aperture stack including Kubernetes is currently using the 1.3.x version,
+which works fine. If anything, the switch would be to code-generated marshal /
+unmarshal types. The approach used to shoe-horn the new repository into the old,
+disguised as a minor version bump (1.3.x -> 1.4.x) is also particularly
+concerning.
+
+This fork will maintain the 1.3.x line and pull patches from other 1.3.x maint
+upstreams, until either a move to 1.4.x is possible or a better alternative
+(like gogo protobuf or streaming encoding or flatbuffers) is used.
+
